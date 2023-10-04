@@ -1,0 +1,233 @@
+﻿<!DOCTYPE html>
+
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="utf-8" />
+    <title></title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/milligram/1.4.1/milligram.css">
+</head>
+<body>
+    <u id="loading-section">Loading...</u>
+    <div id="container-section" hidden>
+        <!--abstract component-->
+        <div id="abstract-section" hidden>
+            <h3>Abstract</h3>
+            <blockquote>
+                <p>
+                    <em id="message"></em>
+                    <em id="message-generate">This document doesn't have an Abstract created, please click the "Generate Abstract" button to create one.</em>
+                </p>
+            </blockquote>
+            <button id="generate-button" class="button button-outline">Generate Abstract</button>
+        </div>
+        <hr />
+        <!-- chat component -->
+        <div id="chat-section" hidden>
+            <h3>Ask the document</h3>
+            <div id="chat-input" style="display:flex">
+                <input id="chat-input-text" type="text" placeholder="Type a message..." style="flex:1" />
+                <button id="chat-input-button" class="button button-clear" style="flex:0">Ask</button>
+            </div>
+            <small>Suffix "- to <i>Field Name</i>", will save answer in a field.</small>
+            <div id="chat-messages">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class chatModel {
+            constructor(onSendMessage) {
+
+                const chatSection = document.getElementById("chat-section");
+                if (!!chatSection) {
+                    chatSection.hidden = false;
+                }
+
+                const chatInputText = document.getElementById("chat-input-text");
+                const chatInputButton = document.getElementById("chat-input-button");
+                const chatMessages = document.getElementById("chat-messages");
+
+                this.addMessage = (message) => {
+                    let messageElement = document.createElement("blockquote");
+                    if (!!message.question) {
+                        let question = document.createElement("strong");
+                        question.innerText = message.question;
+                        messageElement.appendChild(question);
+                    }
+                    let i = document.createElement("i")
+                    i.innerText = message.answer;
+                    let em = document.createElement("em")
+                    em.appendChild(i)
+                    let p = document.createElement("p");
+                    p.appendChild(em);
+                    messageElement.appendChild(p);
+                    chatMessages.appendChild(messageElement);
+                };
+
+                this.addMessageError = () => {
+                    cm.addMessage({ answer: "Unexpected error has occurred, please try again later." });
+                };
+
+                this.clearMessages = () => {
+                    chatMessages.innerHTML = "";
+                };
+
+                this.clearMessage = () => {
+                    chatInputText.value = "";
+                };
+
+                this.clearAll = () => {
+                    cm.clearMessages();
+                    cm.clearMessage();
+                };
+
+                this.toggleEnableSend = (enable) => {
+                    chatInputButton.disabled = !enable;
+                    chatInputText.disabled = !enable;
+                };
+
+                chatInputButton.addEventListener("click", () => {
+                    let message = chatInputText.value;
+                    cm.toggleEnableSend(false);
+                    if (!!message) {
+                        onSendMessage(message);
+                        cm.clearMessage();
+                    }
+                });
+
+                var cm = this;
+            }
+        }
+
+
+        class abstractModel {
+            constructor(onGenerate) {
+
+                const abstractSection = document.getElementById("abstract-section");
+                if (!!abstractSection) {
+                    abstractSection.hidden = false;
+                }
+
+                const message = document.getElementById("message");
+                const messageGenerate = document.getElementById("message-generate");
+                const generateButton = document.getElementById("generate-button");
+                generateButton.addEventListener("click", onGenerate);
+
+                this.setAbstract = (abstractResponse) => {
+                    message.innerText = abstractResponse.response;
+                    am.toggleGenerateVisibility(true);
+                };
+
+                this.clearAbstract = () => {
+                    message.innerText = "";
+                    am.toggleGenerateVisibility(false);
+                };
+
+                this.toggleGenerateVisibility = (hide) => {
+                    messageGenerate.hidden = hide;
+                    if (hide) {
+                        generateButton.style["display"] = "none";
+                    } else {
+                        generateButton.style["display"] = "block";
+                    }
+                };
+
+                var am = this;
+            }
+
+        }
+
+        class documentAbstractChatViewModel {
+            constructor(card) {
+
+                const loadingSection = document.getElementById("loading-section");
+                const containerSection = document.getElementById("container-section");
+                const workspaceID = card._api.window._configuration.relativity.workspaceId;
+                const api = new documentAbstractChatApi(card);
+
+                card.loadFrame = function () {
+                    vm.loadInitialState();
+                }
+
+                this.generateAbstract = () => {
+                    if (!!card.document) {
+                        api.generateAbstract(workspaceID, card.document.artifactId)
+                            .then(abstractSection.setAbstract)
+                            .catch(abstractSection.clearAbstract)
+                    }
+                }
+
+                this.sendQuestion = (question) => {
+                    if (!!card.document) {
+                        api.chat(workspaceID, card.document.artifactId, question)
+                            .then((httpResponse) =>
+                                chatSection.addMessage({question,answer:httpResponse.response.replace(/\\n/g, "\n")}))
+                            .catch(chatSection.addMessageError)
+                            .finally(() => chatSection.toggleEnableSend(true));
+                    }
+                }
+
+                this.loadInitialState = () => {
+                    vm.toggleLoadState(true);
+
+                    if (!!card.document) {
+                        abstractSection.clearAbstract();
+                        chatSection.clearAll();
+                        api.getIsReadyDoc(workspaceID, card.document.artifactId)
+                            .then(abstractSection.setAbstract)
+                            .catch(abstractSection.clearAbstract)
+                            .finally(() => vm.toggleLoadState(false));
+                        api.chatHistory(workspaceID, card.document.artifactId)
+                            .then((httpResponse) => {
+                                JSON.parse(httpResponse.response).forEach(
+                                    (message) => {
+                                        chatSection.addMessage(message);
+                                    });
+                            })
+                            .catch(chatSection.clearAll)
+                            .finally(() => chatSection.toggleEnableSend(true));
+                    }
+                }
+
+                this.toggleLoadState = (isLoading) => {
+                    loadingSection.hidden = !isLoading
+                    containerSection.hidden = isLoading;
+                }
+
+                var vm = this;
+                const abstractSection = new abstractModel(this.generateAbstract);
+                const chatSection = new chatModel(this.sendQuestion);
+            }            
+        }
+
+        class documentAbstractChatApi {
+            constructor(card) {
+                const httpClient = card._api.utilities._httpClientFactory.getHttpClient();
+                const baseUrl = "/Relativity.REST/api/nserio/dac";
+
+                this.getIsReadyDoc = (workspaceID, documentArtifactID) => {
+                    return httpClient.get(`${baseUrl}/${workspaceID}/${documentArtifactID}/abstract`);
+                }
+
+                this.chatHistory = (workspaceID, documentArtifactID) => {
+                    return httpClient.get(`${baseUrl}/${workspaceID}/${documentArtifactID}/chat`);
+                }
+
+                this.generateAbstract = (workspaceID, documentArtifactID) => {
+                    return httpClient.post(`${baseUrl}/${workspaceID}/${documentArtifactID}/abstract`);
+                }
+
+                this.chat = (workspaceID, documentArtifactID, question) => {
+                    return httpClient.post(`${baseUrl}/${workspaceID}/${documentArtifactID}/chat`, { question });
+                }
+            }
+        };
+
+
+        (function run(reviewCard) {
+            let chat = new documentAbstractChatViewModel(reviewCard);
+            chat.loadInitialState();
+        })(window.frameElement.reviewCard);
+    </script>
+</body>
+</html>
